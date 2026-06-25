@@ -70,13 +70,39 @@ pip install harvesters
 python main.py --gige-ip 192.168.1.125 --calibrate
 ```
 
-Requires a GenTL `.cti` producer on that machine (macOS: `brew install aravis`; Windows: install a GenTL-compliant SDK such as MatrixVision mvIMPACT Acquire, Pleora eBUS SDK, or the camera vendor's driver). [gige_capture.py](gige_capture.py) auto-discovers it under `/opt/homebrew`, `/usr/local`, `C:/Program Files`, `C:/Program Files (x86)`, or the `GENICAM_GENTL64_PATH` env var.
+Requires a GenTL `.cti` producer on that machine (macOS: `brew install aravis`; Windows: install a GenTL-compliant SDK such as MatrixVision mvIMPACT Acquire, Pleora eBUS SDK, Cognex GigE Vision Configuration Tool, HuarayTech MV Viewer, or the camera vendor's driver). [gige_capture.py](gige_capture.py) auto-discovers it under `/opt/homebrew`, `/usr/local`, `C:/Program Files`, `C:/Program Files (x86)`, or the `GENICAM_GENTL64_PATH` env var.
 
 ```bash
 # search for the .cti yourself if auto-discovery fails
 find /opt/homebrew -name "*.cti"                     # macOS
-Get-ChildItem -Path "C:\Program Files","C:\Program Files (x86)" -Recurse -Filter *.cti   # Windows (PowerShell)
 ```
+
+```powershell
+# Windows (PowerShell) - search and view result without scrolling a long list
+Get-ChildItem -Path "C:\Program Files","C:\Program Files (x86)" -Recurse -Filter *.cti -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName | Out-File -FilePath "$env:USERPROFILE\Desktop\cti_path.txt"
+notepad "$env:USERPROFILE\Desktop\cti_path.txt"
+
+# check a specific vendor's install folder, e.g. HuarayTech MV Viewer or Cognex tools
+Get-ChildItem "C:\Program Files\MVS","C:\Program Files\HuarayTech","C:\Program Files (x86)\MVS","C:\Program Files (x86)\HuarayTech" -ErrorAction SilentlyContinue
+```
+
+### Debugging a Cognex GigE Vision camera (example IP 192.168.125.20)
+
+Run with `--debug` to print GenTL discovery details: producer path used, every device Harvesters can see on the network, the chosen device's pixel format/resolution, and the reason if connection or frame fetch fails.
+
+```powershell
+venv\Scripts\activate
+pip install harvesters
+python main.py --gige-ip 192.168.125.20 --debug --calibrate
+```
+
+Common causes if `--debug` shows `device_info_list is EMPTY`:
+- Windows PC is not on the same subnet as the camera (camera at `192.168.125.20` needs the PC's NIC set to e.g. `192.168.125.10 / 255.255.255.0`).
+- Windows Firewall blocks GigE Vision discovery (UDP). Temporarily disable or add an inbound rule for the Python interpreter.
+- The Cognex GigE Vision Configuration Tool (or another app) already has the camera open — close it before running the script, GigE Vision cameras generally only allow one consumer at a time.
+- No `.cti` producer installed at all — `find_cti_path` raises before reaching discovery; install one of the SDKs listed above.
+
+If the device is found but `device_info is None` (IP not matched) or frames don't arrive, check the IP printed in the `[gige] found device: ...` line against `192.168.125.20` exactly — Harvesters matches on a substring of the device info string, so confirm it's actually present there.
 
 ### Option B — camera on Windows, code/display on Mac
 

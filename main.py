@@ -93,11 +93,13 @@ def main():
     parser.add_argument("--stream-url", metavar="URL", default=None,
                          help="Read an MJPEG/RTSP stream URL instead of a local webcam, "
                               "e.g. http://<windows-ip>:5000/video from windows_server.py")
+    parser.add_argument("--debug", action="store_true",
+                         help="Print verbose GenTL/device discovery info (GigE Vision mode only)")
     args = parser.parse_args()
 
     if args.gige_ip:
         from gige_capture import GigeCapture
-        cap = GigeCapture(args.gige_ip)
+        cap = GigeCapture(args.gige_ip, debug=args.debug)
     elif args.stream_url:
         cap = cv2.VideoCapture(args.stream_url)
         if not cap.isOpened():
