@@ -58,8 +58,45 @@ config.py       # tunable constants
 requirements.txt
 ```
 
-## Moving to an industrial camera
+## Moving to an industrial camera (Cognex GigE Vision)
 
-- GigE/USB3 SDK camera (Basler, FLIR, Cognex...): swap `cv2.VideoCapture` in `main.py` for the SDK's frame grab, keep the rest of the pipeline unchanged.
-- RTSP/GigE Vision standard stream: `cv2.VideoCapture("rtsp://...")` may work directly.
-- Re-run `--calibrate` and re-tune detection thresholds for the new lens/resolution/lighting — nothing else in the pipeline needs to change.
+### Option A — camera and code on the same machine (e.g. everything on Windows)
+
+```powershell
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+pip install harvesters
+python main.py --gige-ip 192.168.1.125 --calibrate
+```
+
+Requires a GenTL `.cti` producer on that machine (macOS: `brew install aravis`; Windows: install a GenTL-compliant SDK such as MatrixVision mvIMPACT Acquire, Pleora eBUS SDK, or the camera vendor's driver). [gige_capture.py](gige_capture.py) auto-discovers it under `/opt/homebrew`, `/usr/local`, `C:/Program Files`, `C:/Program Files (x86)`, or the `GENICAM_GENTL64_PATH` env var.
+
+```bash
+# search for the .cti yourself if auto-discovery fails
+find /opt/homebrew -name "*.cti"                     # macOS
+Get-ChildItem -Path "C:\Program Files","C:\Program Files (x86)" -Recurse -Filter *.cti   # Windows (PowerShell)
+```
+
+### Option B — camera on Windows, code/display on Mac
+
+Run a small MJPEG bridge on the Windows PC where the camera is plugged in, then point the Mac at it over the LAN.
+
+Windows (camera side):
+```powershell
+pip install opencv-python flask
+python windows_server.py --camera 0
+```
+
+Mac (display/processing side):
+```bash
+python3 main.py --stream-url http://<windows-ip>:5000/video
+```
+
+Use Option B if the camera cannot be reached directly from the Mac's network interface (different subnet, camera physically wired only to the Windows PC). See [windows_server.py](windows_server.py) for the bridge implementation, and adapt `capture_loop` there if the camera does not appear as a plain DirectShow device and needs the vendor SDK instead.
+
+### General notes
+
+- Re-run `--calibrate` and re-tune detection thresholds in [config.py](config.py) for the new lens/resolution/lighting — nothing else in the pipeline needs to change.
+- Pixel format (`Mono8`, `BayerRG8`...) is set in the Cognex GigE Vision Configuration Tool; adjust the conversion in `GigeCapture.read()` in [gige_capture.py](gige_capture.py) if colors look wrong.
+- Enable jumbo frames (MTU 9000) on the network interface for high-resolution GigE Vision streams to avoid dropped/corrupted frames.
