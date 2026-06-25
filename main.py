@@ -87,15 +87,31 @@ def main():
                          help="Run interactive pixels-per-cm calibration before tracking")
     parser.add_argument("--log", metavar="FILE.csv", default=None,
                          help="Write timestamp,speed_cm_s rows to this CSV file")
-    parser.add_argument("--camera", type=int, default=0, help="Camera index (default: 0)")
+    parser.add_argument("--camera", type=int, default=0, help="Webcam index (default: 0)")
+    parser.add_argument("--gige-ip", metavar="IP", default=None,
+                         help="Connect directly to a GigE Vision camera at this IP (same network segment as this Mac)")
+    parser.add_argument("--stream-url", metavar="URL", default=None,
+                         help="Read an MJPEG/RTSP stream URL instead of a local webcam, "
+                              "e.g. http://<windows-ip>:5000/video from windows_server.py")
     args = parser.parse_args()
 
-    cap = cv2.VideoCapture(args.camera)
-    if not cap.isOpened():
-        raise RuntimeError(
-            "Could not open webcam. Check camera permissions for Terminal/IDE "
-            "in System Settings > Privacy & Security > Camera."
-        )
+    if args.gige_ip:
+        from gige_capture import GigeCapture
+        cap = GigeCapture(args.gige_ip)
+    elif args.stream_url:
+        cap = cv2.VideoCapture(args.stream_url)
+        if not cap.isOpened():
+            raise RuntimeError(
+                f"Could not open stream at {args.stream_url}. Check the Windows "
+                "server is running and both machines are on the same network."
+            )
+    else:
+        cap = cv2.VideoCapture(args.camera)
+        if not cap.isOpened():
+            raise RuntimeError(
+                "Could not open webcam. Check camera permissions for Terminal/IDE "
+                "in System Settings > Privacy & Security > Camera."
+            )
 
     pixels_per_cm = config.PIXELS_PER_CM
     if args.calibrate:
