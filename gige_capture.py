@@ -1,10 +1,15 @@
-"""GigE Vision capture via Harvesters + Aravis GenTL producer.
+"""GigE Vision capture via Harvesters + a GenTL producer.
+
+On macOS the producer comes from Aravis (brew install aravis). On Windows it
+comes from whichever GenTL-compliant SDK is installed (e.g. MatrixVision
+mvIMPACT Acquire, Pleora eBUS SDK, or the camera vendor's own driver).
 
 Drop-in replacement for cv2.VideoCapture: exposes .read() -> (ok, frame_bgr)
 and .release(), so main.py only needs to swap the capture object.
 """
 
 import glob
+import os
 
 import cv2
 import numpy as np
@@ -14,9 +19,19 @@ from harvesters.core import Harvester
 def find_cti_path():
     candidates = glob.glob("/opt/homebrew/**/*.cti", recursive=True)
     candidates += glob.glob("/usr/local/**/*.cti", recursive=True)
+    candidates += glob.glob("C:/Program Files/**/*.cti", recursive=True)
+    candidates += glob.glob("C:/Program Files (x86)/**/*.cti", recursive=True)
+
+    env_path = os.environ.get("GENICAM_GENTL64_PATH") or os.environ.get("GENICAM_GENTL32_PATH")
+    if env_path:
+        for folder in env_path.split(os.pathsep):
+            candidates += glob.glob(os.path.join(folder, "*.cti"))
+
     if not candidates:
         raise RuntimeError(
-            "No .cti GenTL producer found. Install Aravis: brew install aravis"
+            "No .cti GenTL producer found. macOS: brew install aravis. "
+            "Windows: install a GenTL-compliant SDK (mvIMPACT Acquire, "
+            "Pleora eBUS SDK, or the camera vendor's driver) and retry."
         )
     return candidates[0]
 
