@@ -159,7 +159,9 @@ class GigeCapture:
 
                     # OffsetX/Y must be reset to 0 before shrinking Width/Height on
                     # most GenICam cameras, otherwise the new size can exceed the
-                    # sensor bounds relative to the current offset.
+                    # sensor bounds relative to the current offset. Center the
+                    # crop afterwards instead of leaving it pinned to the
+                    # top-left corner of the sensor.
                     try:
                         node_map.OffsetX.value = 0
                         node_map.OffsetY.value = 0
@@ -168,6 +170,17 @@ class GigeCapture:
 
                     node_map.Width.value = new_width
                     node_map.Height.value = new_height
+
+                    try:
+                        offset_x = ((sensor_width - new_width) // 2) // 4 * 4
+                        offset_y = ((sensor_height - new_height) // 2) // 4 * 4
+                        node_map.OffsetX.value = offset_x
+                        node_map.OffsetY.value = offset_y
+                        if debug:
+                            print(f"[gige] centered ROI at offset ({offset_x}, {offset_y})")
+                    except Exception as exc:
+                        if debug:
+                            print(f"[gige] could not center ROI offset: {exc!r}")
                     if debug:
                         print(f"[gige] applied ROI crop, new size "
                               f"{node_map.Width.value}x{node_map.Height.value}")
