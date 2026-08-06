@@ -36,7 +36,8 @@ def run_calibration(cap):
             points.append((x, y))
 
     window = "Calibration - click 2 points of known distance, press q to cancel"
-    cv2.namedWindow(window)
+    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window, 1024, 768)
     cv2.setMouseCallback(window, on_click)
 
     while True:
@@ -138,6 +139,11 @@ def main():
         result = run_calibration(cap)
         if result is not None:
             pixels_per_cm = result
+
+    cv2.namedWindow("Conveyor Speed Tracker", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Conveyor Speed Tracker", 1024, 768)
+    cv2.namedWindow("Detection Mask", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Detection Mask", 640, 480)
 
     tracker = MOG2Tracker() if args.mode == "mog2" else HSVTracker()
     kf = build_kalman_filter()

@@ -182,8 +182,15 @@ class GigeCapture:
                             print(f"[gige] camera does not support Decimation: {exc!r}")
 
                     if applied and debug:
+                        try:
+                            offset_x = node_map.OffsetX.value
+                            offset_y = node_map.OffsetY.value
+                        except Exception:
+                            offset_x = offset_y = "unknown"
                         print(f"[gige] applied {factor}x decimation (full FOV kept), new size "
-                              f"{node_map.Width.value}x{node_map.Height.value}")
+                              f"{node_map.Width.value}x{node_map.Height.value}, "
+                              f"offset ({offset_x}, {offset_y}), "
+                              f"sensor max {node_map.WidthMax.value}x{node_map.HeightMax.value}")
                     elif not applied and debug:
                         print("[gige] leaving full resolution - decimation unsupported, "
                               "and a Width/Height crop would lose field of view instead of "
