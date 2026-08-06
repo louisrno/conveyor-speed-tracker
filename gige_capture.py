@@ -109,6 +109,27 @@ class GigeCapture:
                 print(f"[gige] Width x Height: {node_map.Width.value} x {node_map.Height.value}")
             except Exception as exc:
                 print(f"[gige] could not read node map: {exc}")
+            for node_name in ("TriggerMode", "TriggerSource", "TriggerSelector", "AcquisitionMode"):
+                try:
+                    value = getattr(node_map, node_name).value
+                    print(f"[gige] {node_name}: {value}")
+                except Exception as exc:
+                    print(f"[gige] could not read {node_name}: {exc!r}")
+
+        # If the camera is waiting for an external hardware/software trigger
+        # (common in an automation cell wired to a PLC), free-run fetch()
+        # calls will hang/timeout forever since no frame is ever produced on
+        # its own. Force free-run acquisition so this script can pull frames
+        # continuously on demand instead of waiting for an external trigger.
+        try:
+            if node_map.TriggerMode.value == "On":
+                if debug:
+                    print("[gige] TriggerMode was On (camera waiting for external trigger) "
+                          "- forcing it Off for free-run capture")
+                node_map.TriggerMode.value = "Off"
+        except Exception as exc:
+            if debug:
+                print(f"[gige] could not read/set TriggerMode: {exc!r}")
 
         # Bandwidth-limited links (e.g. a 100 Mbit USB-Ethernet dock) cannot
         # sustain a full-resolution continuous stream from a multi-megapixel
@@ -149,16 +170,14 @@ class GigeCapture:
             current_packet_size = node_map.GevSCPSPacketSize.value
             if debug:
                 print(f"[gige] current GevSCPSPacketSize: {current_packet_size}")
-            # 1500 is the standard Ethernet MTU, but GevSCPSPacketSize counts
-            # the full packet including IP/UDP/GVSP headers (~36-42 bytes) on
-            # most cameras, so requesting exactly 1500 still overflows the MTU
-            # and gets silently dropped by the NIC/driver. Leave real headroom
-            # unless the user overrides it explicitly.
-            safe_packet_size = packet_size if packet_size is not None else 1400
-            if packet_size is not None or current_packet_size > safe_packet_size:
-                node_map.GevSCPSPacketSize.value = safe_packet_size
+            # Only override if the caller explicitly asked for a specific size -
+            # a mismatched MTU isn't necessarily the issue (e.g. jumbo frames
+            # may already be enabled on the NIC), so don't fight the camera's
+            # own default unless told to.
+            if packet_size is not None:
+                node_map.GevSCPSPacketSize.value = packet_size
                 if debug:
-                    print(f"[gige] set GevSCPSPacketSize to {safe_packet_size} "
+                    print(f"[gige] set GevSCPSPacketSize to {packet_size} "
                           f"(was {current_packet_size})")
         except Exception as exc:
             if debug:
