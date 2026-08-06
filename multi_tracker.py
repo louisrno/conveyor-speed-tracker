@@ -30,6 +30,25 @@ MAX_MATCH_DISTANCE_PX = 150  # don't associate a detection to a track further th
 MAX_MISSED_FRAMES = 15       # drop a track after this many frames with no matching detection
 
 
+def white_balance(frame):
+    """Gray-world white balance: scales each channel so their means match,
+    removing an ambient color cast (e.g. cyan-tinted industrial lighting)
+    that would otherwise bias hue-based classification - a yellow object
+    under cyan light reads with a green-shifted hue without this."""
+    b, g, r = cv2.split(frame.astype(np.float32))
+    b_mean, g_mean, r_mean = b.mean(), g.mean(), r.mean()
+    gray_mean = (b_mean + g_mean + r_mean) / 3.0
+
+    # guard against a near-black frame (mean ~0) causing a huge/unstable gain
+    if min(b_mean, g_mean, r_mean) < 1.0:
+        return frame
+
+    b *= gray_mean / b_mean
+    g *= gray_mean / g_mean
+    r *= gray_mean / r_mean
+    return cv2.merge([b, g, r]).clip(0, 255).astype(np.uint8)
+
+
 def classify_color(frame, bbox):
     """Sample the color inside the bbox and classify it into a name.
 
@@ -133,9 +152,10 @@ class MultiObjectTracker:
 
     def update(self, frame, bboxes):
         timestamp = time.time()
+        balanced_frame = white_balance(frame)
         detections = []
         for bbox in bboxes:
-            color_name, color_bgr = classify_color(frame, bbox)
+            color_name, color_bgr = classify_color(balanced_frame, bbox)
             x, y, w, h = bbox
             cx, cy = x + w // 2, y + h // 2
             detections.append((bbox, color_name, color_bgr, (cx, cy)))
