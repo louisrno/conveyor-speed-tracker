@@ -139,6 +139,25 @@ class GigeCapture:
                 if debug:
                     print(f"[gige] could not apply ROI/Width-Height reduction: {exc}")
 
+        # Classic GigE Vision failure mode: the camera's stream channel packet
+        # size (GevSCPSPacketSize) defaults to something larger than the
+        # host NIC's MTU (standard Ethernet = 1500). Every packet then gets
+        # silently dropped and fetch() times out forever, regardless of
+        # resolution. Force it down to a size that fits a standard MTU.
+        try:
+            current_packet_size = node_map.GevSCPSPacketSize.value
+            if debug:
+                print(f"[gige] current GevSCPSPacketSize: {current_packet_size}")
+            safe_packet_size = 1500
+            if current_packet_size > safe_packet_size:
+                node_map.GevSCPSPacketSize.value = safe_packet_size
+                if debug:
+                    print(f"[gige] set GevSCPSPacketSize to {safe_packet_size} "
+                          "(was larger than standard 1500 MTU, would drop every packet)")
+        except Exception as exc:
+            if debug:
+                print(f"[gige] could not read/set GevSCPSPacketSize: {exc!r}")
+
         if target_fps is not None:
             try:
                 node_map.AcquisitionFrameRateEnable.value = True
@@ -170,7 +189,7 @@ class GigeCapture:
                 return True, frame_bgr.copy()
         except Exception as exc:
             if self.debug:
-                print(f"[gige] fetch failed: {exc}")
+                print(f"[gige] fetch failed: {type(exc).__name__}: {exc!r}")
             return False, None
 
     def isOpened(self):
