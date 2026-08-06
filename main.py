@@ -103,12 +103,17 @@ def main():
                               "bandwidth-limited links like a 100 Mbit USB-Ethernet dock (GigE mode only)")
     parser.add_argument("--target-fps", type=float, default=None,
                          help="Cap the camera's acquisition frame rate (GigE mode only)")
+    parser.add_argument("--packet-size", type=int, default=None,
+                         help="Force GevSCPSPacketSize in bytes (GigE mode only). Default 1400, "
+                              "safely under a standard 1500 MTU. Lower it further (e.g. 1000) if "
+                              "fetches still time out.")
     args = parser.parse_args()
 
     if args.gige_ip:
         from gige_capture import GigeCapture
         cap = GigeCapture(args.gige_ip, cti_path=args.cti_path, debug=args.debug,
-                           max_width=args.max_width, target_fps=args.target_fps)
+                           max_width=args.max_width, target_fps=args.target_fps,
+                           packet_size=args.packet_size)
     elif args.stream_url:
         cap = cv2.VideoCapture(args.stream_url)
         if not cap.isOpened():

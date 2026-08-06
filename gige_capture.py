@@ -45,7 +45,8 @@ def find_cti_path(debug=False):
 
 
 class GigeCapture:
-    def __init__(self, ip_address, cti_path=None, debug=False, max_width=None, target_fps=None):
+    def __init__(self, ip_address, cti_path=None, debug=False, max_width=None,
+                 target_fps=None, packet_size=None):
         self.debug = debug
 
         self.harvester = Harvester()
@@ -148,12 +149,17 @@ class GigeCapture:
             current_packet_size = node_map.GevSCPSPacketSize.value
             if debug:
                 print(f"[gige] current GevSCPSPacketSize: {current_packet_size}")
-            safe_packet_size = 1500
-            if current_packet_size > safe_packet_size:
+            # 1500 is the standard Ethernet MTU, but GevSCPSPacketSize counts
+            # the full packet including IP/UDP/GVSP headers (~36-42 bytes) on
+            # most cameras, so requesting exactly 1500 still overflows the MTU
+            # and gets silently dropped by the NIC/driver. Leave real headroom
+            # unless the user overrides it explicitly.
+            safe_packet_size = packet_size if packet_size is not None else 1400
+            if packet_size is not None or current_packet_size > safe_packet_size:
                 node_map.GevSCPSPacketSize.value = safe_packet_size
                 if debug:
                     print(f"[gige] set GevSCPSPacketSize to {safe_packet_size} "
-                          "(was larger than standard 1500 MTU, would drop every packet)")
+                          f"(was {current_packet_size})")
         except Exception as exc:
             if debug:
                 print(f"[gige] could not read/set GevSCPSPacketSize: {exc!r}")
