@@ -62,18 +62,41 @@ class GigeCapture:
             for d in self.harvester.device_info_list:
                 print(f"[gige] found device: {d}")
 
-        device_info = next(
-            (d for d in self.harvester.device_info_list if ip_address in str(d)),
-            None,
-        )
-        if device_info is None:
-            available = [str(d) for d in self.harvester.device_info_list]
+        if not self.harvester.device_info_list:
             raise RuntimeError(
-                f"No GigE Vision device found at {ip_address}. "
-                f"Devices seen: {available or 'none'}. Run with --debug for more detail, "
+                "No GigE Vision device found at all. Run with --debug for more detail, "
                 "and make sure no other tool (e.g. the Cognex GigE Vision Configuration "
-                "Tool itself) is holding the camera open."
+                "Tool or VisionPro) is holding the camera open."
             )
+
+        # device_info entries don't expose the IP directly (just model/serial/
+        # vendor), so if there's exactly one device just use it. Otherwise try
+        # to match by opening each and reading its actual IP from the node map.
+        if len(self.harvester.device_info_list) == 1:
+            device_info = self.harvester.device_info_list[0]
+        else:
+            device_info = None
+            for candidate in self.harvester.device_info_list:
+                probe = self.harvester.create(candidate)
+                try:
+                    candidate_ip = probe.remote_device.node_map.GevCurrentIPAddress.value
+                    if debug:
+                        print(f"[gige] candidate {candidate} -> IP {candidate_ip}")
+                    if str(candidate_ip) == ip_address:
+                        device_info = candidate
+                        probe.destroy()
+                        break
+                except Exception as exc:
+                    if debug:
+                        print(f"[gige] could not read IP for {candidate}: {exc}")
+                probe.destroy()
+
+            if device_info is None:
+                available = [str(d) for d in self.harvester.device_info_list]
+                raise RuntimeError(
+                    f"No GigE Vision device matched IP {ip_address}. "
+                    f"Devices seen: {available}. Run with --debug for more detail."
+                )
 
         self.acquirer = self.harvester.create(device_info)
 
