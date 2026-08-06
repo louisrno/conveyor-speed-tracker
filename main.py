@@ -22,6 +22,7 @@ import numpy as np
 
 import config
 from kalman import build_kalman_filter, predict_and_correct, reset as kalman_reset
+from multi_tracker import MultiObjectTracker
 from trackers import MOG2Tracker, HSVTracker
 
 
@@ -112,6 +113,9 @@ def main():
                          help="Force GevSCPSPacketSize in bytes (GigE mode only). Default 1400, "
                               "safely under a standard 1500 MTU. Lower it further (e.g. 1000) if "
                               "fetches still time out.")
+    parser.add_argument("--multi", action="store_true",
+                         help="Track multiple objects at once, each with its own ID, speed, "
+                              "and detected color, instead of just the single largest object")
     args = parser.parse_args()
 
     if args.gige_ip:
@@ -154,12 +158,17 @@ def main():
     speed_history = deque(maxlen=config.SPEED_SMOOTHING_WINDOW)
     trail = deque(maxlen=config.TRAIL_LENGTH)
 
+    multi_tracker = MultiObjectTracker(pixels_per_cm) if args.multi else None
+
     fps_timestamps = deque(maxlen=30)
 
     csv_file = open(args.log, "w", newline="") if args.log else None
     csv_writer = csv.writer(csv_file) if csv_file else None
     if csv_writer:
-        csv_writer.writerow(["timestamp", "speed_cm_s"])
+        if args.multi:
+            csv_writer.writerow(["timestamp", "track_id", "color", "speed_cm_s"])
+        else:
+            csv_writer.writerow(["timestamp", "speed_cm_s"])
 
     print(f"Mode: {args.mode} | PIXELS_PER_CM: {pixels_per_cm:.3f} | press q to quit")
 
@@ -181,59 +190,84 @@ def main():
             now = time.time()
             fps_timestamps.append(now)
 
-            bbox, mask = tracker.detect(frame)
-            speed_cm_s = 0.0
-
-            if bbox is not None:
-                x, y, w, h = bbox
-                raw_cx, raw_cy = x + w // 2, y + h // 2
-
-                if not kalman_initialized:
-                    kalman_reset(kf, raw_cx, raw_cy)
-                    kalman_initialized = True
-
-                cx, cy = predict_and_correct(kf, raw_cx, raw_cy)
-                cx, cy = int(cx), int(cy)
-
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.circle(frame, (cx, cy), 6, (0, 0, 255), -1)
-                trail.append((cx, cy))
-
-                if prev_position is not None:
-                    dt = now - prev_timestamp
-                    if dt > 0:
-                        dist_px = float(np.hypot(cx - prev_position[0], cy - prev_position[1]))
-                        dist_cm = dist_px / pixels_per_cm
-                        raw_speed = dist_cm / dt
-
-                        if raw_speed <= config.MAX_SPEED_CM_S:
-                            speed_history.append(raw_speed)
-                            if csv_writer:
-                                csv_writer.writerow([f"{now:.3f}", f"{raw_speed:.2f}"])
-
-                prev_position = (cx, cy)
-                prev_timestamp = now
-            else:
-                prev_position = None
-                prev_timestamp = None
-                speed_history.clear()
-                trail.clear()
-                kalman_initialized = False
-
-            if speed_history:
-                speed_cm_s = sum(speed_history) / len(speed_history)
-
-            for i in range(1, len(trail)):
-                cv2.line(frame, trail[i - 1], trail[i], (0, 200, 255), 2)
-
             fps = 0.0
             if len(fps_timestamps) >= 2:
                 fps = (len(fps_timestamps) - 1) / (fps_timestamps[-1] - fps_timestamps[0])
 
-            cv2.putText(frame, f"Speed: {speed_cm_s:.1f} cm/s", (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
-            cv2.putText(frame, f"FPS: {fps:.0f}  mode: {args.mode}", (20, 70),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+            if args.multi:
+                bboxes, mask = tracker.detect_multi(frame)
+                tracks = multi_tracker.update(frame, bboxes)
+
+                for track in tracks:
+                    x, y, w, h = track.bbox
+                    cx, cy = track.position
+                    color = track.color_bgr
+
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+                    cv2.circle(frame, (cx, cy), 6, (0, 0, 255), -1)
+                    for i in range(1, len(track.trail)):
+                        cv2.line(frame, track.trail[i - 1], track.trail[i], color, 2)
+
+                    label = f"#{track.id} {track.color_name} {track.speed_cm_s:.1f} cm/s"
+                    cv2.putText(frame, label, (x, max(0, y - 10)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+                    if csv_writer and track.speed_history:
+                        csv_writer.writerow([f"{now:.3f}", track.id, track.color_name,
+                                              f"{track.speed_cm_s:.2f}"])
+
+                cv2.putText(frame, f"Objects: {len(tracks)}  FPS: {fps:.0f}  mode: {args.mode}",
+                            (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            else:
+                bbox, mask = tracker.detect(frame)
+                speed_cm_s = 0.0
+
+                if bbox is not None:
+                    x, y, w, h = bbox
+                    raw_cx, raw_cy = x + w // 2, y + h // 2
+
+                    if not kalman_initialized:
+                        kalman_reset(kf, raw_cx, raw_cy)
+                        kalman_initialized = True
+
+                    cx, cy = predict_and_correct(kf, raw_cx, raw_cy)
+                    cx, cy = int(cx), int(cy)
+
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    cv2.circle(frame, (cx, cy), 6, (0, 0, 255), -1)
+                    trail.append((cx, cy))
+
+                    if prev_position is not None:
+                        dt = now - prev_timestamp
+                        if dt > 0:
+                            dist_px = float(np.hypot(cx - prev_position[0], cy - prev_position[1]))
+                            dist_cm = dist_px / pixels_per_cm
+                            raw_speed = dist_cm / dt
+
+                            if raw_speed <= config.MAX_SPEED_CM_S:
+                                speed_history.append(raw_speed)
+                                if csv_writer:
+                                    csv_writer.writerow([f"{now:.3f}", f"{raw_speed:.2f}"])
+
+                    prev_position = (cx, cy)
+                    prev_timestamp = now
+                else:
+                    prev_position = None
+                    prev_timestamp = None
+                    speed_history.clear()
+                    trail.clear()
+                    kalman_initialized = False
+
+                if speed_history:
+                    speed_cm_s = sum(speed_history) / len(speed_history)
+
+                for i in range(1, len(trail)):
+                    cv2.line(frame, trail[i - 1], trail[i], (0, 200, 255), 2)
+
+                cv2.putText(frame, f"Speed: {speed_cm_s:.1f} cm/s", (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+                cv2.putText(frame, f"FPS: {fps:.0f}  mode: {args.mode}", (20, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
 
             cv2.imshow("Conveyor Speed Tracker", frame)
             cv2.imshow("Detection Mask", mask)

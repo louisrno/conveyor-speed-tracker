@@ -1,0 +1,169 @@
+"""Multi-object tracking: assigns a stable ID to each detected object across
+frames, smooths its position with its own Kalman filter, computes its speed,
+and samples its dominant color.
+
+Association is nearest-centroid matching (greedy, by distance) - simple and
+fast, sufficient for a handful of objects moving in one direction on a
+conveyor. Not a full Hungarian/IoU tracker.
+"""
+
+import time
+from collections import deque
+
+import cv2
+import numpy as np
+
+import config
+from kalman import build_kalman_filter, predict_and_correct, reset as kalman_reset
+
+COLOR_NAMES = {
+    "red": ((0, 100, 80), (10, 255, 255)),
+    "orange": ((11, 100, 80), (25, 255, 255)),
+    "yellow": ((26, 100, 80), (35, 255, 255)),
+    "green": ((36, 60, 60), (85, 255, 255)),
+    "blue": ((86, 60, 60), (130, 255, 255)),
+    "purple": ((131, 60, 60), (155, 255, 255)),
+    "red2": ((156, 100, 80), (180, 255, 255)),  # red wraps around hue 0/180
+}
+
+MAX_MATCH_DISTANCE_PX = 150  # don't associate a detection to a track further than this
+MAX_MISSED_FRAMES = 15       # drop a track after this many frames with no matching detection
+
+
+def classify_color(frame, bbox):
+    """Sample the mean color inside the bbox and classify it into a name."""
+    x, y, w, h = bbox
+    roi = frame[y:y + h, x:x + w]
+    if roi.size == 0:
+        return "unknown", (128, 128, 128)
+
+    mean_bgr = roi.reshape(-1, 3).mean(axis=0)
+    mean_bgr_uint8 = np.uint8([[mean_bgr]])
+    mean_hsv = cv2.cvtColor(mean_bgr_uint8, cv2.COLOR_BGR2HSV)[0][0]
+    hue, sat, val = int(mean_hsv[0]), int(mean_hsv[1]), int(mean_hsv[2])
+
+    if sat < 40 or val < 40:
+        name = "gray/black" if val < 100 else "white/gray"
+        return name, tuple(int(c) for c in mean_bgr)
+
+    for name, (lower, upper) in COLOR_NAMES.items():
+        if lower[0] <= hue <= upper[0]:
+            return name.rstrip("2"), tuple(int(c) for c in mean_bgr)
+
+    return "unknown", tuple(int(c) for c in mean_bgr)
+
+
+class TrackedObject:
+    def __init__(self, track_id, bbox, color_name, color_bgr, timestamp):
+        self.id = track_id
+        self.bbox = bbox
+        self.color_name = color_name
+        self.color_bgr = color_bgr
+        self.kf = build_kalman_filter()
+
+        x, y, w, h = bbox
+        cx, cy = x + w // 2, y + h // 2
+        kalman_reset(self.kf, cx, cy)
+        self.position = (cx, cy)
+
+        self.prev_position = None
+        self.prev_timestamp = None
+        self.last_seen_timestamp = timestamp
+
+        self.speed_history = deque(maxlen=config.SPEED_SMOOTHING_WINDOW)
+        self.trail = deque(maxlen=config.TRAIL_LENGTH)
+        self.trail.append(self.position)
+        self.missed_frames = 0
+
+    @property
+    def speed_cm_s(self):
+        if not self.speed_history:
+            return 0.0
+        return sum(self.speed_history) / len(self.speed_history)
+
+    def update(self, bbox, color_name, color_bgr, pixels_per_cm, timestamp):
+        self.bbox = bbox
+        self.color_name = color_name
+        self.color_bgr = color_bgr
+        self.missed_frames = 0
+        self.last_seen_timestamp = timestamp
+
+        x, y, w, h = bbox
+        raw_cx, raw_cy = x + w // 2, y + h // 2
+        cx, cy = predict_and_correct(self.kf, raw_cx, raw_cy)
+        cx, cy = int(cx), int(cy)
+        self.position = (cx, cy)
+        self.trail.append(self.position)
+
+        if self.prev_position is not None:
+            dt = timestamp - self.prev_timestamp
+            if dt > 0:
+                dist_px = float(np.hypot(cx - self.prev_position[0], cy - self.prev_position[1]))
+                dist_cm = dist_px / pixels_per_cm
+                raw_speed = dist_cm / dt
+                if raw_speed <= config.MAX_SPEED_CM_S:
+                    self.speed_history.append(raw_speed)
+
+        self.prev_position = self.position
+        self.prev_timestamp = timestamp
+
+    def mark_missed(self):
+        self.missed_frames += 1
+
+
+class MultiObjectTracker:
+    def __init__(self, pixels_per_cm):
+        self.pixels_per_cm = pixels_per_cm
+        self.tracks = {}
+        self._next_id = 1
+
+    def update(self, frame, bboxes):
+        timestamp = time.time()
+        detections = []
+        for bbox in bboxes:
+            color_name, color_bgr = classify_color(frame, bbox)
+            x, y, w, h = bbox
+            cx, cy = x + w // 2, y + h // 2
+            detections.append((bbox, color_name, color_bgr, (cx, cy)))
+
+        unmatched_detections = list(range(len(detections)))
+        unmatched_tracks = list(self.tracks.keys())
+
+        # Greedy nearest-centroid matching: repeatedly pick the closest
+        # (track, detection) pair under the distance threshold.
+        pairs = []
+        for track_id in unmatched_tracks:
+            tx, ty = self.tracks[track_id].position
+            for det_idx in unmatched_detections:
+                _, _, _, (dx, dy) = detections[det_idx]
+                dist = np.hypot(tx - dx, ty - dy)
+                if dist <= MAX_MATCH_DISTANCE_PX:
+                    pairs.append((dist, track_id, det_idx))
+        pairs.sort(key=lambda p: p[0])
+
+        matched_tracks = set()
+        matched_detections = set()
+        for _dist, track_id, det_idx in pairs:
+            if track_id in matched_tracks or det_idx in matched_detections:
+                continue
+            bbox, color_name, color_bgr, _ = detections[det_idx]
+            self.tracks[track_id].update(bbox, color_name, color_bgr, self.pixels_per_cm, timestamp)
+            matched_tracks.add(track_id)
+            matched_detections.add(det_idx)
+
+        for track_id in unmatched_tracks:
+            if track_id not in matched_tracks:
+                self.tracks[track_id].mark_missed()
+
+        for det_idx in range(len(detections)):
+            if det_idx not in matched_detections:
+                bbox, color_name, color_bgr, _ = detections[det_idx]
+                track_id = self._next_id
+                self._next_id += 1
+                self.tracks[track_id] = TrackedObject(track_id, bbox, color_name, color_bgr, timestamp)
+
+        stale_ids = [tid for tid, t in self.tracks.items() if t.missed_frames > MAX_MISSED_FRAMES]
+        for tid in stale_ids:
+            del self.tracks[tid]
+
+        return list(self.tracks.values())

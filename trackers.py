@@ -19,23 +19,28 @@ class MOG2Tracker:
         self.kernel = np.ones((5, 5), np.uint8)
 
     def detect(self, frame):
+        bboxes, mask = self.detect_multi(frame)
+        return (bboxes[0] if bboxes else None), mask
+
+    def detect_multi(self, frame):
         fg_mask = self.bg_subtractor.apply(frame)
         _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
         fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, self.kernel, iterations=2)
         fg_mask = cv2.dilate(fg_mask, self.kernel, iterations=2)
 
         contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        bbox = self._largest_valid_contour(contours)
-        return bbox, fg_mask
+        bboxes = self._valid_contours(contours)
+        return bboxes, fg_mask
 
     @staticmethod
-    def _largest_valid_contour(contours):
-        if not contours:
-            return None
-        largest = max(contours, key=cv2.contourArea)
-        if cv2.contourArea(largest) < config.MIN_CONTOUR_AREA:
-            return None
-        return cv2.boundingRect(largest)
+    def _valid_contours(contours):
+        bboxes = []
+        for contour in contours:
+            if cv2.contourArea(contour) >= config.MIN_CONTOUR_AREA:
+                bboxes.append(cv2.boundingRect(contour))
+        # largest first, so single-object callers (detect()) keep old behavior
+        bboxes.sort(key=lambda b: b[2] * b[3], reverse=True)
+        return bboxes
 
 
 class HSVTracker:
@@ -52,11 +57,15 @@ class HSVTracker:
         self.upper = np.array(upper, dtype=np.uint8)
 
     def detect(self, frame):
+        bboxes, mask = self.detect_multi(frame)
+        return (bboxes[0] if bboxes else None), mask
+
+    def detect_multi(self, frame):
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, self.lower, self.upper)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel, iterations=2)
         mask = cv2.dilate(mask, self.kernel, iterations=2)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        bbox = MOG2Tracker._largest_valid_contour(contours)
-        return bbox, mask
+        bboxes = MOG2Tracker._valid_contours(contours)
+        return bboxes, mask
