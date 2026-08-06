@@ -2,7 +2,7 @@
 
 # Calibration: pixels per centimeter. Use the calibration mode (--calibrate)
 # to set this interactively instead of guessing.
-PIXELS_PER_CM = 20.0
+PIXELS_PER_CM = 51.613
 
 # Detection
 MIN_CONTOUR_AREA = 800
