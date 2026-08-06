@@ -163,46 +163,34 @@ class GigeCapture:
 
         # Bandwidth-limited links (e.g. a 100 Mbit USB-Ethernet dock) cannot
         # sustain a full-resolution continuous stream from a multi-megapixel
-        # sensor - reduce resolution via binning and/or cap the frame rate.
+        # sensor. Use Decimation (pixel/line subsampling) rather than a
+        # Width/Height ROI crop: decimation reduces resolution while keeping
+        # the FULL field of view, whereas a Width/Height crop only keeps a
+        # smaller window of the sensor (an actual zoom-in, not a downscale).
         if max_width is not None:
             try:
                 sensor_width = node_map.Width.value
-                sensor_height = node_map.Height.value
                 if sensor_width > max_width:
-                    scale = max_width / sensor_width
-                    new_width = int(sensor_width * scale) - (int(sensor_width * scale) % 4)
-                    new_height = int(sensor_height * scale) - (int(sensor_height * scale) % 4)
-
-                    # OffsetX/Y must be reset to 0 before shrinking Width/Height on
-                    # most GenICam cameras, otherwise the new size can exceed the
-                    # sensor bounds relative to the current offset. Center the
-                    # crop afterwards instead of leaving it pinned to the
-                    # top-left corner of the sensor.
+                    factor = max(1, round(sensor_width / max_width))
+                    applied = False
                     try:
-                        node_map.OffsetX.value = 0
-                        node_map.OffsetY.value = 0
-                    except Exception:
-                        pass
-
-                    node_map.Width.value = new_width
-                    node_map.Height.value = new_height
-
-                    try:
-                        offset_x = ((sensor_width - new_width) // 2) // 4 * 4
-                        offset_y = ((sensor_height - new_height) // 2) // 4 * 4
-                        node_map.OffsetX.value = offset_x
-                        node_map.OffsetY.value = offset_y
-                        if debug:
-                            print(f"[gige] centered ROI at offset ({offset_x}, {offset_y})")
+                        node_map.DecimationHorizontal.value = factor
+                        node_map.DecimationVertical.value = factor
+                        applied = True
                     except Exception as exc:
                         if debug:
-                            print(f"[gige] could not center ROI offset: {exc!r}")
-                    if debug:
-                        print(f"[gige] applied ROI crop, new size "
+                            print(f"[gige] camera does not support Decimation: {exc!r}")
+
+                    if applied and debug:
+                        print(f"[gige] applied {factor}x decimation (full FOV kept), new size "
                               f"{node_map.Width.value}x{node_map.Height.value}")
+                    elif not applied and debug:
+                        print("[gige] leaving full resolution - decimation unsupported, "
+                              "and a Width/Height crop would lose field of view instead of "
+                              "just reducing bandwidth. Consider a Gigabit link instead.")
             except Exception as exc:
                 if debug:
-                    print(f"[gige] could not apply ROI/Width-Height reduction: {exc}")
+                    print(f"[gige] could not apply decimation: {exc!r}")
 
         # Classic GigE Vision failure mode: the camera's stream channel packet
         # size (GevSCPSPacketSize) defaults to something larger than the
