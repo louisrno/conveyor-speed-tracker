@@ -98,11 +98,17 @@ def main():
     parser.add_argument("--cti-path", metavar="PATH", default=None,
                          help="Force a specific GenTL .cti producer path instead of auto-discovery "
                               "(GigE Vision mode only), e.g. the vendor's GEV producer")
+    parser.add_argument("--max-width", type=int, default=None,
+                         help="Downscale (via sensor binning) to at most this width, useful on "
+                              "bandwidth-limited links like a 100 Mbit USB-Ethernet dock (GigE mode only)")
+    parser.add_argument("--target-fps", type=float, default=None,
+                         help="Cap the camera's acquisition frame rate (GigE mode only)")
     args = parser.parse_args()
 
     if args.gige_ip:
         from gige_capture import GigeCapture
-        cap = GigeCapture(args.gige_ip, cti_path=args.cti_path, debug=args.debug)
+        cap = GigeCapture(args.gige_ip, cti_path=args.cti_path, debug=args.debug,
+                           max_width=args.max_width, target_fps=args.target_fps)
     elif args.stream_url:
         cap = cv2.VideoCapture(args.stream_url)
         if not cap.isOpened():

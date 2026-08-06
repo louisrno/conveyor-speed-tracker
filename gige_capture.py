@@ -45,7 +45,7 @@ def find_cti_path(debug=False):
 
 
 class GigeCapture:
-    def __init__(self, ip_address, cti_path=None, debug=False):
+    def __init__(self, ip_address, cti_path=None, debug=False, max_width=None, target_fps=None):
         self.debug = debug
 
         self.harvester = Harvester()
@@ -100,13 +100,41 @@ class GigeCapture:
 
         self.acquirer = self.harvester.create(device_info)
 
+        node_map = self.acquirer.remote_device.node_map
+
         if debug:
             try:
-                node_map = self.acquirer.remote_device.node_map
                 print(f"[gige] PixelFormat: {node_map.PixelFormat.value}")
                 print(f"[gige] Width x Height: {node_map.Width.value} x {node_map.Height.value}")
             except Exception as exc:
                 print(f"[gige] could not read node map: {exc}")
+
+        # Bandwidth-limited links (e.g. a 100 Mbit USB-Ethernet dock) cannot
+        # sustain a full-resolution continuous stream from a multi-megapixel
+        # sensor - reduce resolution via binning and/or cap the frame rate.
+        if max_width is not None:
+            try:
+                current_width = node_map.Width.value
+                if current_width > max_width:
+                    binning = max(1, round(current_width / max_width))
+                    node_map.BinningHorizontal.value = binning
+                    node_map.BinningVertical.value = binning
+                    if debug:
+                        print(f"[gige] applied {binning}x binning, new size "
+                              f"{node_map.Width.value}x{node_map.Height.value}")
+            except Exception as exc:
+                if debug:
+                    print(f"[gige] could not apply binning: {exc}")
+
+        if target_fps is not None:
+            try:
+                node_map.AcquisitionFrameRateEnable.value = True
+                node_map.AcquisitionFrameRate.value = target_fps
+                if debug:
+                    print(f"[gige] capped AcquisitionFrameRate to {target_fps}")
+            except Exception as exc:
+                if debug:
+                    print(f"[gige] could not set frame rate: {exc}")
 
         self.acquirer.start()
         if debug:
