@@ -131,6 +131,20 @@ class GigeCapture:
             if debug:
                 print(f"[gige] could not read/set TriggerMode: {exc!r}")
 
+        # AcquisitionMode=SingleFrame means the camera produces exactly one
+        # frame per start() and then stops - every fetch() after the first
+        # times out forever since nothing new is ever captured. Force
+        # Continuous so it keeps producing frames for the whole session.
+        try:
+            if node_map.AcquisitionMode.value != "Continuous":
+                if debug:
+                    print(f"[gige] AcquisitionMode was {node_map.AcquisitionMode.value} "
+                          "- forcing it to Continuous")
+                node_map.AcquisitionMode.value = "Continuous"
+        except Exception as exc:
+            if debug:
+                print(f"[gige] could not read/set AcquisitionMode: {exc!r}")
+
         # Bandwidth-limited links (e.g. a 100 Mbit USB-Ethernet dock) cannot
         # sustain a full-resolution continuous stream from a multi-megapixel
         # sensor - reduce resolution via binning and/or cap the frame rate.
