@@ -245,7 +245,11 @@ class GigeCapture:
                 if "Mono" in pixel_format:
                     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
                 elif "Bayer" in pixel_format:
-                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BAYER_BG2BGR)
+                    # Edge-aware demosaicing (_EA) gives noticeably more
+                    # accurate colors than the plain bilinear variant, at a
+                    # small CPU cost - worth it since color classification
+                    # depends on it.
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BAYER_BG2BGR_EA)
                 else:
                     frame_bgr = frame  # already BGR/RGB-like, adjust if colors look swapped
 

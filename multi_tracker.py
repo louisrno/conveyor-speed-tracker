@@ -31,26 +31,40 @@ MAX_MISSED_FRAMES = 15       # drop a track after this many frames with no match
 
 
 def classify_color(frame, bbox):
-    """Sample the mean color inside the bbox and classify it into a name."""
+    """Sample the color inside the bbox and classify it into a name.
+
+    Uses the center ~50% of the box (edges are the likeliest place to catch
+    background/conveyor pixels bleeding in) and a per-pixel HSV median
+    (robust to specular highlights and shadow edges, unlike a BGR mean)."""
     x, y, w, h = bbox
-    roi = frame[y:y + h, x:x + w]
+    inset_x, inset_y = w // 4, h // 4
+    cx0, cy0 = x + inset_x, y + inset_y
+    cx1, cy1 = x + w - inset_x, y + h - inset_y
+    roi = frame[cy0:cy1, cx0:cx1]
+    if roi.size == 0:
+        roi = frame[y:y + h, x:x + w]
     if roi.size == 0:
         return "unknown", (128, 128, 128)
 
-    mean_bgr = roi.reshape(-1, 3).mean(axis=0)
-    mean_bgr_uint8 = np.uint8([[mean_bgr]])
-    mean_hsv = cv2.cvtColor(mean_bgr_uint8, cv2.COLOR_BGR2HSV)[0][0]
-    hue, sat, val = int(mean_hsv[0]), int(mean_hsv[1]), int(mean_hsv[2])
+    hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV).reshape(-1, 3)
+    hue, sat, val = (int(v) for v in np.median(hsv_roi, axis=0))
 
-    if sat < 40 or val < 40:
+    median_bgr_uint8 = np.uint8([[[hue, sat, val]]])
+    median_bgr = cv2.cvtColor(median_bgr_uint8, cv2.COLOR_HSV2BGR)[0][0]
+    color_bgr = tuple(int(c) for c in median_bgr)
+
+    # Low-saturation pixels are grayscale/metallic regardless of measured
+    # hue - ambient light tint alone can otherwise push them into a color
+    # bucket. Require a real amount of saturation before trusting hue.
+    if sat < 60 or val < 40:
         name = "gray/black" if val < 100 else "white/gray"
-        return name, tuple(int(c) for c in mean_bgr)
+        return name, color_bgr
 
     for name, (lower, upper) in COLOR_NAMES.items():
         if lower[0] <= hue <= upper[0]:
-            return name.rstrip("2"), tuple(int(c) for c in mean_bgr)
+            return name.rstrip("2"), color_bgr
 
-    return "unknown", tuple(int(c) for c in mean_bgr)
+    return "unknown", color_bgr
 
 
 class TrackedObject:
