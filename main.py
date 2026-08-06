@@ -58,6 +58,10 @@ def run_calibration(cap):
         if key == ord("q"):
             cv2.destroyWindow(window)
             return None
+        if cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
+            # window was closed via its X button rather than 'q' - cv2.imshow
+            # would otherwise silently recreate it on the next iteration
+            return None
         if len(points) == 2:
             break
 
@@ -229,6 +233,9 @@ def main():
             cv2.imshow("Detection Mask", mask)
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+            if (cv2.getWindowProperty("Conveyor Speed Tracker", cv2.WND_PROP_VISIBLE) < 1
+                    or cv2.getWindowProperty("Detection Mask", cv2.WND_PROP_VISIBLE) < 1):
                 break
     finally:
         if csv_file:
