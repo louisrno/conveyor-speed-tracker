@@ -142,11 +142,19 @@ def main():
 
     print(f"Mode: {args.mode} | PIXELS_PER_CM: {pixels_per_cm:.3f} | press q to quit")
 
+    consecutive_failures = 0
+    max_consecutive_failures = 30
+
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
-                break
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive_failures:
+                    print(f"{max_consecutive_failures} consecutive frame reads failed, stopping.")
+                    break
+                continue
+            consecutive_failures = 0
 
             frame = cv2.flip(frame, 1)
             now = time.time()

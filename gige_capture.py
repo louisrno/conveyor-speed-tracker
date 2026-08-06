@@ -114,7 +114,7 @@ class GigeCapture:
 
     def read(self):
         try:
-            with self.acquirer.fetch(timeout=2) as buffer:
+            with self.acquirer.fetch(timeout=5) as buffer:
                 component = buffer.payload.components[0]
                 frame = component.data.reshape(component.height, component.width)
 
