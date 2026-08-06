@@ -114,17 +114,30 @@ class GigeCapture:
         # sensor - reduce resolution via binning and/or cap the frame rate.
         if max_width is not None:
             try:
-                current_width = node_map.Width.value
-                if current_width > max_width:
-                    binning = max(1, round(current_width / max_width))
-                    node_map.BinningHorizontal.value = binning
-                    node_map.BinningVertical.value = binning
+                sensor_width = node_map.Width.value
+                sensor_height = node_map.Height.value
+                if sensor_width > max_width:
+                    scale = max_width / sensor_width
+                    new_width = int(sensor_width * scale) - (int(sensor_width * scale) % 4)
+                    new_height = int(sensor_height * scale) - (int(sensor_height * scale) % 4)
+
+                    # OffsetX/Y must be reset to 0 before shrinking Width/Height on
+                    # most GenICam cameras, otherwise the new size can exceed the
+                    # sensor bounds relative to the current offset.
+                    try:
+                        node_map.OffsetX.value = 0
+                        node_map.OffsetY.value = 0
+                    except Exception:
+                        pass
+
+                    node_map.Width.value = new_width
+                    node_map.Height.value = new_height
                     if debug:
-                        print(f"[gige] applied {binning}x binning, new size "
+                        print(f"[gige] applied ROI crop, new size "
                               f"{node_map.Width.value}x{node_map.Height.value}")
             except Exception as exc:
                 if debug:
-                    print(f"[gige] could not apply binning: {exc}")
+                    print(f"[gige] could not apply ROI/Width-Height reduction: {exc}")
 
         if target_fps is not None:
             try:
