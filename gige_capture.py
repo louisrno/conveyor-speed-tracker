@@ -150,6 +150,23 @@ class GigeCapture:
         # sensor - reduce resolution via binning and/or cap the frame rate.
         if max_width is not None:
             try:
+                # Width/Height/Offset persist on the camera across script runs
+                # (not reset on start()), so always reset to the sensor's true
+                # maximum first - otherwise a previous run's crop becomes the
+                # new "full frame" and this run's math silently skips itself
+                # or crops an already-cropped region.
+                try:
+                    node_map.OffsetX.value = 0
+                    node_map.OffsetY.value = 0
+                    node_map.Width.value = node_map.WidthMax.value
+                    node_map.Height.value = node_map.HeightMax.value
+                    if debug:
+                        print(f"[gige] reset to full sensor size "
+                              f"{node_map.Width.value}x{node_map.Height.value} before cropping")
+                except Exception as exc:
+                    if debug:
+                        print(f"[gige] could not reset to full sensor size: {exc!r}")
+
                 sensor_width = node_map.Width.value
                 sensor_height = node_map.Height.value
                 if sensor_width > max_width:
