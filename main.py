@@ -95,11 +95,14 @@ def main():
                               "e.g. http://<windows-ip>:5000/video from windows_server.py")
     parser.add_argument("--debug", action="store_true",
                          help="Print verbose GenTL/device discovery info (GigE Vision mode only)")
+    parser.add_argument("--cti-path", metavar="PATH", default=None,
+                         help="Force a specific GenTL .cti producer path instead of auto-discovery "
+                              "(GigE Vision mode only), e.g. the vendor's GEV producer")
     args = parser.parse_args()
 
     if args.gige_ip:
         from gige_capture import GigeCapture
-        cap = GigeCapture(args.gige_ip, debug=args.debug)
+        cap = GigeCapture(args.gige_ip, cti_path=args.cti_path, debug=args.debug)
     elif args.stream_url:
         cap = cv2.VideoCapture(args.stream_url)
         if not cap.isOpened():
